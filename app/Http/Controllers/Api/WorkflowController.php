@@ -124,6 +124,34 @@ class WorkflowController extends Controller
     }
 
     /**
+     * Approve document without digital signature
+     */
+    public function approve(Request $request, Document $document)
+    {
+        $this->authorize('approve', $document);
+        
+        $request->validate([
+            'remarks' => 'nullable|string|max:1000'
+        ]);
+
+        try {
+            $this->workflowService->approveDocument($document, $request->remarks);
+
+            return ApiResponse::success(
+                $document->fresh(['approvedBy']),
+                'Document approved successfully'
+            );
+        } catch (\InvalidArgumentException $e) {
+            return ApiResponse::validationError([
+                'status' => [$e->getMessage()],
+            ], 'Document cannot be approved');
+        } catch (\Exception $e) {
+            Log::error('Error approving document: ' . $e->getMessage());
+            return ApiResponse::serverError('Failed to approve document: ' . $e->getMessage());
+        }
+    }
+
+    /**
      * Put document on hold
      */
     public function hold(Request $request, Document $document)
@@ -212,6 +240,7 @@ class WorkflowController extends Controller
                 'can_forward' => $document->canBeForwarded() && $this->workflowService->canPerformAction($document, 'forward', $user),
                 'can_receive' => $document->canBeReceived() && $this->workflowService->canPerformAction($document, 'receive', $user),
                 'can_sign' => $document->canBeSigned() && $this->workflowService->canPerformAction($document, 'sign', $user),
+                'can_approve' => $document->canBeApproved() && $this->workflowService->canPerformAction($document, 'approve', $user),
                 'can_reject' => $this->workflowService->canPerformAction($document, 'reject', $user),
                 'can_hold' => $document->canBePutOnHold() && $this->workflowService->canPerformAction($document, 'hold', $user),
                 'can_resume' => $document->canBeResumed() && $this->workflowService->canPerformAction($document, 'resume', $user),

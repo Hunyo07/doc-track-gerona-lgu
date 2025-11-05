@@ -66,6 +66,7 @@ Route::middleware(['auth:sanctum', 'rate.limit'])->group(function () {
         Route::post('documents/{document}/receive', [WorkflowController::class, 'receive'])->whereNumber('document');
         Route::post('documents/{document}/reject', [WorkflowController::class, 'reject'])->whereNumber('document');
         Route::post('documents/{document}/sign', [WorkflowController::class, 'sign'])->whereNumber('document');
+        Route::post('documents/{document}/approve', [WorkflowController::class, 'approve'])->whereNumber('document');
         Route::post('documents/{document}/hold', [WorkflowController::class, 'hold'])->whereNumber('document');
         Route::post('documents/{document}/resume', [WorkflowController::class, 'resume'])->whereNumber('document');
         Route::post('documents/{document}/complete', [WorkflowController::class, 'complete'])->whereNumber('document');

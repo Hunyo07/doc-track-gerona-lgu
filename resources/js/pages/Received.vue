@@ -819,9 +819,9 @@ const clearSelection = () => {
 
 // Document actions
 const approveDocument = async (document) => {
-    const remarks = prompt("Add approval/sign remarks (optional):") || "";
+    const remarks = prompt("Add approval remarks (optional):") || "";
     try {
-        await workflowStore.signDocument(document.id, remarks);
+        await workflowStore.approveDocument(document.id, remarks);
         alert("Document approved successfully!");
         fetchDocuments();
         fetchStats();
@@ -877,7 +877,7 @@ const bulkApprove = async () => {
     bulkLoading.value = true;
     try {
         await Promise.all(
-            selectedDocuments.value.map((id) => workflowStore.signDocument(id, notes))
+            selectedDocuments.value.map((id) => workflowStore.approveDocument(id, notes))
         );
 
         selectedDocuments.value = [];
@@ -956,7 +956,7 @@ const processBulkAction = async () => {
     try {
         if (bulkActionForm.action === "approve") {
             await Promise.all(
-                selectedDocuments.value.map((id) => workflowStore.signDocument(id, bulkActionForm.notes || "Bulk approved"))
+                selectedDocuments.value.map((id) => workflowStore.approveDocument(id, bulkActionForm.notes || "Bulk approved"))
             );
         } else if (bulkActionForm.action === "reject") {
             await Promise.all(

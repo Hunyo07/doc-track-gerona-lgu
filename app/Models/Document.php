@@ -165,6 +165,15 @@ class Document extends Model
         return $this->status === DocumentStatus::RECEIVED;
     }
 
+    public function canBeApproved(): bool
+    {
+        return in_array($this->status, [
+            DocumentStatus::RECEIVED,
+            DocumentStatus::UNDER_REVIEW,
+            DocumentStatus::FOR_APPROVAL,
+        ]);
+    }
+
     public function canBeCompleted(): bool
     {
         return $this->status === DocumentStatus::APPROVED;

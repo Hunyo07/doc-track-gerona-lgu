@@ -7,6 +7,9 @@ use App\Models\Document;
 use App\Models\DocumentLog;
 use App\Models\DocumentRoute;
 use App\Models\Department;
+use App\Models\User;
+use App\Notifications\GenericNotification;
+use Illuminate\Support\Facades\Notification;
 use App\Models\Signature;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -69,6 +72,32 @@ class DocumentWorkflowService
                 'remarks' => $remarks,
                 'assigned_user_id' => $assignedUserId,
             ]);
+
+            // Notify: receiving office users, creator, and assigned user if any
+            $recipients = [];
+            foreach ($toOffice->users as $deptUser) {
+                $recipients[] = $deptUser;
+            }
+            if ($document->creator) {
+                $recipients[] = $document->creator;
+            }
+            if (!is_null($assignedUserId)) {
+                $assigned = User::find($assignedUserId);
+                if ($assigned) $recipients[] = $assigned;
+            }
+
+            $this->notifyUsers(
+                $document->fresh(['creator']),
+                'forwarded',
+                'Document forwarded',
+                "{$document->document_number} forwarded to {$toOffice->name}" . ($assignedUserId ? " and assigned" : ''),
+                [
+                    'to_office_id' => $toOfficeId,
+                    'to_office_name' => $toOffice->name,
+                    'assigned_user_id' => $assignedUserId,
+                ],
+                $recipients
+            );
         });
 
         return true;
@@ -95,6 +124,29 @@ class DocumentWorkflowService
             'notes' => $notes,
         ]);
 
+        // Notify: creator and assigned user
+        $recipients = [];
+        if ($document->creator) {
+            $recipients[] = $document->creator;
+        }
+        if ($document->assignedTo) {
+            $recipients[] = $document->assignedTo;
+        }
+        $dept = $document->currentDepartment;
+        $by = Auth::user()?->name;
+        $this->notifyUsers(
+            $document->fresh(['creator', 'assignedTo', 'currentDepartment']),
+            'received',
+            'Document received',
+            "{$document->document_number} received at {$dept?->name} by {$by}",
+            [
+                'current_office_id' => $dept?->id,
+                'current_office_name' => $dept?->name,
+                'notes' => $notes,
+            ],
+            $recipients
+        );
+
         return true;
     }
 
@@ -113,6 +165,26 @@ class DocumentWorkflowService
         $this->logAction($document, 'rejected', 'Document rejected', [
             'reason' => $reason,
         ]);
+
+        // Notify: creator and assigned user
+        $recipients = [];
+        if ($document->creator) {
+            $recipients[] = $document->creator;
+        }
+        if ($document->assignedTo) {
+            $recipients[] = $document->assignedTo;
+        }
+        $by = Auth::user()?->name;
+        $this->notifyUsers(
+            $document->fresh(['creator', 'assignedTo']),
+            'rejected',
+            'Document rejected',
+            "{$document->document_number} rejected by {$by}",
+            [
+                'reason' => $reason,
+            ],
+            $recipients
+        );
 
         return true;
     }
@@ -155,6 +227,51 @@ class DocumentWorkflowService
     }
 
     /**
+     * Approve document without digital signature
+     */
+    public function approveDocument(Document $document, ?string $remarks = null): bool
+    {
+        if (!$document->canBeApproved()) {
+            throw new InvalidArgumentException('Document cannot be approved in current status');
+        }
+
+        $user = Auth::user();
+
+        $document->update([
+            'status' => DocumentStatus::APPROVED,
+            'approved_by' => $user->id,
+            'approved_at' => now(),
+        ]);
+
+        $this->logAction($document, 'approved', 'Document approved', [
+            'remarks' => $remarks,
+        ]);
+
+        // Notify: creator and assigned user
+        $recipients = [];
+        if ($document->creator) {
+            $recipients[] = $document->creator;
+        }
+        if ($document->assignedTo) {
+            $recipients[] = $document->assignedTo;
+        }
+        $by = Auth::user()?->name;
+        $dept = Auth::user()?->department?->name;
+        $this->notifyUsers(
+            $document->fresh(['creator', 'assignedTo']),
+            'approved',
+            'Document approved',
+            "{$document->document_number} approved by {$by}" . ($dept ? " ({$dept})" : ''),
+            [
+                'remarks' => $remarks,
+            ],
+            $recipients
+        );
+
+        return true;
+    }
+
+    /**
      * Put document on hold
      */
     public function holdDocument(Document $document, string $reason, ?string $remarks = null): bool
@@ -173,6 +290,25 @@ class DocumentWorkflowService
             'reason' => $reason,
             'remarks' => $remarks,
         ]);
+
+        $recipients = [];
+        if ($document->creator) {
+            $recipients[] = $document->creator;
+        }
+        if ($document->assignedTo) {
+            $recipients[] = $document->assignedTo;
+        }
+        $this->notifyUsers(
+            $document->fresh(['creator', 'assignedTo']),
+            'on_hold',
+            'Document placed on hold',
+            "{$document->document_number} placed on hold",
+            [
+                'reason' => $reason,
+                'remarks' => $remarks,
+            ],
+            $recipients
+        );
 
         return true;
     }
@@ -196,6 +332,24 @@ class DocumentWorkflowService
             'remarks' => $remarks,
         ]);
 
+        $recipients = [];
+        if ($document->creator) {
+            $recipients[] = $document->creator;
+        }
+        if ($document->assignedTo) {
+            $recipients[] = $document->assignedTo;
+        }
+        $this->notifyUsers(
+            $document->fresh(['creator', 'assignedTo']),
+            'resumed',
+            'Document resumed',
+            "{$document->document_number} resumed from hold",
+            [
+                'remarks' => $remarks,
+            ],
+            $recipients
+        );
+
         return true;
     }
 
@@ -216,6 +370,24 @@ class DocumentWorkflowService
         $this->logAction($document, 'completed', 'Document approved and completed', [
             'remarks' => $remarks,
         ]);
+
+        $recipients = [];
+        if ($document->creator) {
+            $recipients[] = $document->creator;
+        }
+        if ($document->assignedTo) {
+            $recipients[] = $document->assignedTo;
+        }
+        $this->notifyUsers(
+            $document->fresh(['creator', 'assignedTo']),
+            'completed',
+            'Document completed',
+            "{$document->document_number} completed",
+            [
+                'remarks' => $remarks,
+            ],
+            $recipients
+        );
 
         return true;
     }
@@ -272,5 +444,36 @@ class DocumentWorkflowService
                 'status' => $document->status->value,
             ]),
         ]);
+    }
+
+    /**
+     * Dispatch notifications to relevant users for a workflow event.
+     */
+    private function notifyUsers(Document $document, string $event, string $title, string $message, array $extra = [], array $recipients = []): void
+    {
+        // Build context
+        $payload = array_merge([
+            'document_id' => $document->id,
+            'document_number' => $document->document_number,
+        ], $extra);
+
+        // Normalize recipients to unique user set
+        $unique = [];
+        $users = [];
+        foreach ($recipients as $user) {
+            if (!$user instanceof User) {
+                continue;
+            }
+            if (!isset($unique[$user->id])) {
+                $unique[$user->id] = true;
+                $users[] = $user;
+            }
+        }
+
+        if (count($users) === 0) {
+            return;
+        }
+
+        Notification::send($users, new GenericNotification($title, $message, 'document.' . $event, $payload));
     }
 }

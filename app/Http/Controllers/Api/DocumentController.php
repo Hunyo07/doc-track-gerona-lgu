@@ -728,27 +728,56 @@ class DocumentController extends Controller
         $newStatus = $request->status;
         $notes = $request->notes;
 
-        DB::transaction(function () use ($documentIds, $newStatus, $notes, $request) {
-            // Update documents
-            Document::whereIn('id', $documentIds)->update([
-                'status' => $newStatus,
-                'updated_at' => now()
-            ]);
+        $updated = 0;
+        $errors = [];
 
-            // Create logs for each document
-            foreach ($documentIds as $documentId) {
-                DocumentLog::create([
-                    'document_id' => $documentId,
-                    'user_id' => $request->user()->id,
-                    'action' => 'status_changed',
-                    'description' => "Status changed to {$newStatus}" . ($notes ? " - {$notes}" : ''),
-                ]);
+        foreach ($documentIds as $documentId) {
+            try {
+                $document = Document::findOrFail($documentId);
+                // Prefer workflow service for statuses that have side effects/notifications
+                switch ($newStatus) {
+                    case DocumentStatus::COMPLETED->value:
+                        $this->workflowService->completeDocument($document, $notes);
+                        break;
+                    case DocumentStatus::APPROVED->value:
+                        $this->workflowService->approveDocument($document, $notes);
+                        break;
+                    case DocumentStatus::REJECTED->value:
+                        $this->workflowService->rejectDocument($document, $notes ?? '');
+                        break;
+                    case DocumentStatus::ON_HOLD->value:
+                        $this->workflowService->holdDocument($document, $notes ?? 'On hold');
+                        break;
+                    case DocumentStatus::RECEIVED->value:
+                        $this->workflowService->receiveDocument($document, $notes);
+                        break;
+                    default:
+                        // Fallback: direct update + log
+                        DB::transaction(function () use ($document, $newStatus, $notes) {
+                            $document->update([
+                                'status' => $newStatus,
+                                'updated_at' => now()
+                            ]);
+
+                            DocumentLog::create([
+                                'document_id' => $document->id,
+                                'user_id' => Auth::id(),
+                                'action' => 'status_changed',
+                                'description' => "Status changed to {$newStatus}" . ($notes ? " - {$notes}" : ''),
+                            ]);
+                        });
+                        break;
+                }
+                $updated++;
+            } catch (\Throwable $e) {
+                $errors[] = "Document {$documentId}: {$e->getMessage()}";
             }
-        });
+        }
 
         return response()->json([
             'message' => 'Documents updated successfully',
-            'updated_count' => count($documentIds)
+            'updated_count' => $updated,
+            'errors' => $errors,
         ]);
     }
 

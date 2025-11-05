@@ -72,6 +72,21 @@ export const useWorkflowStore = defineStore("workflow", {
             }
         },
 
+        async approveDocument(documentId, remarks) {
+            this.loading = true;
+            try {
+                const response = await axios.post(`/api/workflow/documents/${documentId}/approve`, {
+                    remarks
+                });
+                return response.data;
+            } catch (error) {
+                console.error("❌ Error approving document:", error);
+                throw error;
+            } finally {
+                this.loading = false;
+            }
+        },
+
         async holdDocument(documentId, reason, remarks) {
             this.loading = true;
             try {

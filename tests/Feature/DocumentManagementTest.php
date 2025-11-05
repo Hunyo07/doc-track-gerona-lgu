@@ -332,6 +332,65 @@ public function test_can_sign_document()
         $this->assertNotNull($document->completed_at);
     }
 
+    public function test_can_approve_document()
+    {
+        $document = Document::factory()->create([
+            'current_department_id' => $this->department->id,
+            'status' => 'received'
+        ]);
+
+        $response = $this->actingAs($this->user, 'sanctum')
+            ->postJson("/api/workflow/documents/{$document->id}/approve", [
+                'remarks' => 'Reviewed and approved'
+            ]);
+
+        $response->assertStatus(200);
+
+        $document->refresh();
+        $this->assertEquals('approved', $document->status->value);
+        $this->assertEquals($this->user->id, $document->approved_by);
+        $this->assertNotNull($document->approved_at);
+    }
+
+    public function test_cannot_approve_invalid_status()
+    {
+        $document = Document::factory()->create([
+            'current_department_id' => $this->department->id,
+            'status' => 'submitted'
+        ]);
+
+        $response = $this->actingAs($this->user, 'sanctum')
+            ->postJson("/api/workflow/documents/{$document->id}/approve", [
+                'remarks' => 'Attempting to approve too early'
+            ]);
+
+        $response->assertStatus(422);
+        $response->assertJsonStructure(['errors' => ['status']]);
+
+        $document->refresh();
+        $this->assertEquals('submitted', $document->status->value);
+    }
+
+    public function test_approve_requires_authorization()
+    {
+        $otherDept = Department::factory()->create(['name' => 'Other Department']);
+        $document = Document::factory()->create([
+            'current_department_id' => $otherDept->id,
+            'status' => 'received'
+        ]);
+        // Act as a regular user from a different department
+        $regularUser = $this->createUserWithRole('user', ['department_id' => $this->department->id]);
+        $response = $this->actingAs($regularUser, 'sanctum')
+            ->postJson("/api/workflow/documents/{$document->id}/approve", [
+                'remarks' => 'Unauthorized approve'
+            ]);
+
+        $response->assertStatus(403);
+
+        $document->refresh();
+        $this->assertEquals('received', $document->status->value);
+    }
+
     public function test_can_filter_documents()
     {
         // Create test documents
