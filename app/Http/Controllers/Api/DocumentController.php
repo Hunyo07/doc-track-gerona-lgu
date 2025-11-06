@@ -20,10 +20,13 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Auth;
 use Maatwebsite\Excel\Facades\Excel;
 use SimpleSoftwareIO\QrCode\Facades\QrCode as QrCodeGenerator;
 use App\Services\CacheService;
 use App\Services\DocumentWorkflowService;
+use App\Services\PNPKISignatureService;
+use App\Enums\DocumentStatus;
 use BaconQrCode\Renderer\RendererStyle\RendererStyle;
 use BaconQrCode\Renderer\ImageRenderer;
 use BaconQrCode\Renderer\Image\SvgImageBackEnd;
@@ -60,36 +63,25 @@ class DocumentController extends Controller
                 'receivedBy',
             ]);
 
-            // Apply access control based on user role
             $user = $request->user();
             if (!$user->hasRole('admin')) {
-                // Strict: regular users see only documents they created
                 $query->where('created_by', $user->id);
             }
-            // Admin users can see all documents (no additional filtering)
-    
-            // Basic filters
             if ($request->filled('status')) {
                 $query->where('status', $request->status);
             }
 
-            // Filter by document number (for QR/code-based lookup)
             if ($request->filled('document_number')) {
                 $query->where('document_number', $request->document_number);
             }
             
-            // Status in filter (for multiple statuses like "under_review,approved")
             if ($request->filled('status_in')) {
                 $statuses = explode(',', $request->status_in);
                 $query->whereIn('status', $statuses);
             }
-
-            // Filter by creator (for Outgoing page: only documents created by the current user)
             if ($request->filled('created_by')) {
                 $query->where('created_by', $request->created_by);
             }
-            
-            // Receiver-based filters disabled in creator-only visibility
             
             if ($request->filled('exclude_assigned_to')) {
                 $query->where('assigned_to', '!=', $request->exclude_assigned_to)
@@ -599,7 +591,8 @@ class DocumentController extends Controller
             'creator',
             'logs.user',
             'attachments.uploader',
-            'qrCode'
+            'qrCode',
+            'signatures.user',
         ]);
         
         // Cache the document
@@ -612,7 +605,7 @@ class DocumentController extends Controller
     {
         $request->validate(['barcode' => 'required|string']);
         $doc = Document::where('barcode', $request->barcode)
-            ->with(['documentType','department','currentDepartment','creator','logs.user','attachments.uploader','qrCode'])
+            ->with(['documentType','department','currentDepartment','creator','logs.user','attachments.uploader','qrCode','signatures.user'])
             ->first();
         if (!$doc) return ApiResponse::notFound('Document not found');
         return ApiResponse::success($doc, 'Document found successfully');
@@ -1175,13 +1168,16 @@ class DocumentController extends Controller
         Storage::disk('public')->put($sigPath, $sigPayload);
 
         // Persist signature record
-        \App\Models\Signature::create([
+        $signature = \App\Models\Signature::create([
             'document_id' => $document->id,
             'user_id' => $request->user()->id,
             // Column is non-nullable; use empty string placeholder when no image is provided
             'signature_image_path' => '',
+            'signature_file_path' => $sigPath,
             'signature_hash' => $contentHash,
             'signed_at' => now(),
+            'signature_type' => 'pnpki',
+            'verification_status' => 'pending',
         ]);
 
         // Update status to approved (signed) for the current office
@@ -1195,6 +1191,24 @@ class DocumentController extends Controller
             'metadata' => [
                 'sig_path' => $sigPath,
                 'remarks' => $request->remarks,
+            ],
+        ]);
+
+        // Auto-verify PNPKI signature and log outcome
+        /** @var PNPKISignatureService $verifier */
+        $verifier = app(PNPKISignatureService::class);
+        $verified = $verifier->verifySignature($signature);
+        $signature->verification_status = $verified ? 'verified' : 'failed';
+        $signature->save();
+
+        DocumentLog::create([
+            'document_id' => $document->id,
+            'user_id' => $request->user()->id,
+            'action' => $verified ? 'signature_verified' : 'signature_verification_failed',
+            'description' => $verified ? 'Signature verified' : 'Signature verification failed',
+            'metadata' => [
+                'signature_id' => $signature->id,
+                'sig_path' => $sigPath,
             ],
         ]);
 

@@ -48,7 +48,6 @@
                             >
                                 <option value="">All Status</option>
                                 <option value="verified">Verified</option>
-                                <option value="unverified">Unverified</option>
                                 <option value="pending">Pending</option>
                                 <option value="failed">Failed</option>
                             </select>
@@ -124,14 +123,15 @@
                                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
                                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
                                         <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Signed At</th>
+                                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody class="bg-white divide-y divide-gray-200">
                                     <tr v-if="loading">
-                                        <td colspan="7" class="px-6 py-4 text-sm text-gray-500">Loading signatures...</td>
+                                        <td colspan="8" class="px-6 py-4 text-sm text-gray-500">Loading signatures...</td>
                                     </tr>
                                     <tr v-else-if="signatures.length === 0">
-                                        <td colspan="7" class="px-6 py-4 text-sm text-gray-500">No signatures found.</td>
+                                        <td colspan="8" class="px-6 py-4 text-sm text-gray-500">No signatures found.</td>
                                     </tr>
                                     <tr v-else v-for="sig in signatures" :key="sig.id">
                                         <td class="px-6 py-4 whitespace-nowrap text-sm text-indigo-600">
@@ -156,6 +156,15 @@
                                         </td>
                                         <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                                             {{ formatDate(sig.signed_at) }}
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-sm">
+                                            <button
+                                                v-if="sig.verification_status !== 'verified'"
+                                                @click="verifySignature(sig)"
+                                                class="px-3 py-1 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+                                            >
+                                                Verify
+                                            </button>
                                         </td>
                                     </tr>
                                 </tbody>
@@ -230,7 +239,6 @@ const statusClasses = (status) => {
     const base = "px-2 py-1 rounded-full text-xs font-medium";
     const map = {
         verified: "bg-green-100 text-green-800",
-        unverified: "bg-gray-100 text-gray-800",
         pending: "bg-yellow-100 text-yellow-800",
         failed: "bg-red-100 text-red-800",
     };
@@ -241,7 +249,6 @@ const statusLabel = (status) => {
     if (!status) return "Unknown";
     const labels = {
         verified: "Verified",
-        unverified: "Unverified",
         pending: "Pending",
         failed: "Failed",
     };
@@ -340,6 +347,18 @@ const changePage = async (page) => {
 onMounted(async () => {
     await fetchSignatures(1);
 });
+
+const verifySignature = async (sig) => {
+    try {
+        await axios.post(`/api/signatures/${sig.id}/verify`);
+        const currentPage = pagination.value?.current_page || 1;
+        await fetchSignatures(currentPage);
+    } catch (error) {
+        console.error("Error verifying signature:", error);
+        const msg = error?.response?.data?.message || error.message || "Verification failed";
+        window.alert(msg);
+    }
+};
 </script>
 
 <style scoped>

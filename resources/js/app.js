@@ -27,6 +27,7 @@ import Signatures from "./pages/Signatures.vue";
 import Notifications from "./pages/Notifications.vue";
 import QrGenerator from "./pages/QrGenerator.vue";
 import QRTracker from "./pages/QRTracker.vue";
+import DocumentTypes from "./pages/DocumentTypes.vue";
 
 // Import stores
 import { useAuthStore } from "./stores/auth";
@@ -97,6 +98,12 @@ const routes = [
         path: "/admin/offices",
         name: "offices",
         component: Offices,
+        meta: { requiresAuth: true, roles: ["admin"] },
+    },
+    {
+        path: "/admin/document-types",
+        name: "document-types",
+        component: DocumentTypes,
         meta: { requiresAuth: true, roles: ["admin"] },
     },
     {

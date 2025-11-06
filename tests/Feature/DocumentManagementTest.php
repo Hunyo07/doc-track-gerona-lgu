@@ -15,6 +15,9 @@ use Tests\TestCase;
 class DocumentManagementTest extends TestCase
 {
     use RefreshDatabase, WithFaker;
+    protected Department $department;
+    protected DocumentType $documentType;
+    protected User $user;
 
     protected function setUp(): void
     {
@@ -112,7 +115,7 @@ class DocumentManagementTest extends TestCase
         
         $document = Document::latest()->first();
         $this->assertNotNull($document->file_path);
-        Storage::disk('public')->assertExists($document->file_path);
+        $this->assertTrue(Storage::disk('public')->exists($document->file_path));
     }
 
     public function test_can_forward_document_to_another_office()

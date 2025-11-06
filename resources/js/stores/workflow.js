@@ -57,16 +57,41 @@ export const useWorkflowStore = defineStore("workflow", {
             }
         },
 
-        async signDocument(documentId, remarks) {
+        async signDocument(documentId, payload) {
             this.loading = true;
             try {
-                const response = await axios.post(`/api/workflow/documents/${documentId}/sign`, {
-                    remarks
-                });
+                const file = payload?.file ?? payload; // support both object payload and raw File
+                const extraRemarks = (arguments && arguments.length >= 3) ? arguments[2] : undefined;
+                const remarks = payload?.remarks ?? extraRemarks ?? "";
+                const demoMode = payload?.demo_mode ?? false;
+
+                if (!file) {
+                    throw new Error("Signed PDF file is required for signing.");
+                }
+
+                const formData = new FormData();
+                formData.append("file", file);
+                if (remarks) formData.append("remarks", remarks);
+                // Pass demo mode flag to server to bypass verification
+                formData.append("demo_mode", demoMode ? "true" : "false");
+
+                const response = await axios.post(
+                    `/api/workflow/documents/${documentId}/sign`,
+                    formData,
+                    { headers: { "Content-Type": "multipart/form-data" } }
+                );
                 return response.data;
             } catch (error) {
                 console.error("❌ Error signing document:", error);
-                throw error;
+                // Surface server validation messages when available
+                const resp = error?.response?.data || {};
+                const validationMsg = resp?.errors?.signature?.[0] 
+                    || resp?.errors?.file?.[0]
+                    || resp?.message;
+                const message = validationMsg || error.message || "Error signing document";
+                const err = new Error(message);
+                err.response = error?.response;
+                throw err;
             } finally {
                 this.loading = false;
             }

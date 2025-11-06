@@ -170,6 +170,12 @@
                         icon="BuildingOfficeIcon"
                         :roles="['admin']"
                     />
+                    <SidebarLink
+                        :to="{ name: 'document-types' }"
+                        label="Document Types"
+                        icon="DocumentTextIcon"
+                        :roles="['admin']"
+                    />
                 </div>
             </div>
 
@@ -217,6 +223,7 @@
                 :class="uiStore.isSidebarCollapsed ? 'justify-center' : ''"
             >
                 <button
+                v-if="!uiStore.isSidebarCollapsed"
                     @click="handleLogout"
                     class="flex items-center gap-2 px-2 py-2 rounded-md hover:bg-gray-800 w-full"
                     :class="

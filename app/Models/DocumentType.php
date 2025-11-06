@@ -16,12 +16,14 @@ class DocumentType extends Model
         'description',
         'prefix',
         'requires_approval',
-        'is_active'
+        'is_active',
+        'schema'
     ];
 
     protected $casts = [
         'requires_approval' => 'boolean',
         'is_active' => 'boolean',
+        'schema' => 'array',
     ];
 
     public function documents(): HasMany

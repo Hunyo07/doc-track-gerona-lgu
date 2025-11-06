@@ -14,6 +14,7 @@ use BaconQrCode\Renderer\RendererStyle\RendererStyle;
 use BaconQrCode\Renderer\ImageRenderer;
 use BaconQrCode\Renderer\Image\SvgImageBackEnd;
 use BaconQrCode\Writer;
+use SimpleSoftwareIO\QrCode\Facades\QrCode as SimpleQrCode;
 
 class QRCodeController extends Controller
 {
@@ -218,5 +219,19 @@ class QRCodeController extends Controller
             'document' => $document,
             'scan_count' => $qrCode?->scan_count ?? 0,
         ]);
+    }
+
+    /**
+     * Get total QR scans performed by the authenticated user
+     */
+    public function myScanCount(Request $request)
+    {
+        $userId = $request->user()->id;
+
+        $count = \App\Models\DocumentLog::where('user_id', $userId)
+            ->whereIn('action', ['qr_scanned', 'qr_code_scanned'])
+            ->count();
+
+        return response()->json(['count' => $count]);
     }
 }

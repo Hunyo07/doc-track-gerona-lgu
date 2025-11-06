@@ -188,4 +188,12 @@ class Document extends Model
     {
         return $this->status === DocumentStatus::ON_HOLD;
     }
+
+    /**
+     * Determine if the document can be rejected based on current status.
+     */
+    public function canBeRejected(): bool
+    {
+        return $this->status->canTransitionTo(DocumentStatus::REJECTED);
+    }
 }

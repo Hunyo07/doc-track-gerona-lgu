@@ -1828,7 +1828,7 @@ const handleClickOutside = (event) => {
 };
 </script>
 
-<style scoped>
+<style scoped lang="postcss">
 .fade-enter-active,
 .fade-leave-active {
     transition: opacity 0.3s ease;

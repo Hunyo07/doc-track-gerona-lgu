@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\DocumentTrackingController;
 use App\Http\Controllers\Api\SignatureController;
 use App\Http\Controllers\Api\AuditLogController;
 use App\Http\Controllers\Api\GsoDocumentController;
+use App\Http\Controllers\Api\DocumentTypeController;
 use App\Http\Controllers\IssueReportController;
 use App\Models\Document;
 use App\Models\DocumentType;
@@ -127,6 +128,7 @@ Route::middleware(['auth:sanctum', 'rate.limit'])->group(function () {
     Route::post('qr/import', [QRCodeController::class, 'import']);
     Route::post('qr-codes/{document}/scan', [QRCodeController::class, 'logScan'])->whereNumber('document');
     Route::get('qr-codes/{document}/view', [QRCodeController::class, 'viewDocument'])->whereNumber('document');
+    Route::get('qr-codes/my-scan-count', [QRCodeController::class, 'myScanCount']);
     
     // User management routes
     Route::apiResource('users', UserController::class);
@@ -140,6 +142,11 @@ Route::middleware(['auth:sanctum', 'rate.limit'])->group(function () {
     
     // Signatures routes
     Route::get('signatures', [SignatureController::class, 'index']);
+    Route::post('signatures/{signature}/verify', [SignatureController::class, 'verify'])->whereNumber('signature');
+    // Attach external signed PDF to a document and auto-verify
+    Route::post('documents/{document}/signatures/attach-pdf', [SignatureController::class, 'attachPdf'])->whereNumber('document');
+    // Attach signed PDF by document number (e.g., PR-2025-0002)
+    Route::post('documents/code/{documentNumber}/signatures/attach-pdf', [SignatureController::class, 'attachPdfByNumber']);
     
     // Department routes (management - requires authentication)
     Route::post('departments', [DepartmentController::class, 'store']);
@@ -194,19 +201,15 @@ Route::get('documents/share/{documentNumber}', [DocumentController::class, 'shar
 // Public cloud access route with rate limiting
 Route::get('documents/cloud/{token}', [GsoDocumentController::class, 'accessViaCloudToken'])->name('document.cloud')->middleware('rate.limit');
 
-// Document types endpoint with caching
-Route::get('document-types', function () {
-    // Try to get from cache first
-    $documentTypes = \App\Services\CacheService::getCachedDocumentTypes();
-    
-    if (!$documentTypes) {
-        // If not in cache, get from database and cache it
-        $documentTypes = \App\Models\DocumentType::all();
-        \App\Services\CacheService::cacheDocumentTypes($documentTypes);
-    }
-    
-    return response()->json($documentTypes);
-})->middleware('rate.limit');
+// Document types endpoints with caching
+Route::get('document-types', [DocumentTypeController::class, 'index'])->middleware('rate.limit');
+
+// Management endpoints (admin-only) for document types
+Route::middleware(['auth:sanctum', 'rate.limit'])->group(function () {
+    Route::post('document-types', [DocumentTypeController::class, 'store']);
+    Route::put('document-types/{documentType}', [DocumentTypeController::class, 'update']);
+    Route::delete('document-types/{documentType}', [DocumentTypeController::class, 'destroy']);
+});
 
 // Debug endpoint to check database setup
 Route::get('debug/database', function () {

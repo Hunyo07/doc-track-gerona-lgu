@@ -66,6 +66,12 @@ class DocumentAccessMiddleware
             return true;
         }
 
+        // Explicitly assigned users or receivers have access
+        if (($document->assigned_to && (int)$document->assigned_to === (int)$user->id) ||
+            ($document->received_by && (int)$document->received_by === (int)$user->id)) {
+            return true;
+        }
+
         // Check security level access
         if (!$this->hasSecurityLevelAccess($user, $document->security_level ?? 'public')) {
             return false;

@@ -23,6 +23,11 @@ class AuthController extends Controller
 
         $token = $user->createToken('auth-token')->plainTextToken;
 
+        // Log user registration as an auth event
+        \App\Services\AuditLogger::logAuthEvent('register', $user, [
+            'email' => $user->email,
+        ]);
+
         return ApiResponse::created([
             'user' => $user,
             'token' => $token,
@@ -32,16 +37,26 @@ class AuthController extends Controller
     public function login(StoreAuthRequest $request)
     {
         if (!Auth::attempt($request->only('email', 'password'))) {
+            // Log failed login attempt (user may not be authenticated yet)
+            \App\Services\AuditLogger::logAuthEvent('login_failed', null, [
+                'email' => $request->email,
+            ]);
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials are incorrect.'],
             ]);
         }
 
-        $user = Auth::user();
+        $user = \App\Models\User::findOrFail(Auth::id());
         $token = $user->createToken('auth-token')->plainTextToken;
+
 
         $roles = $user->getRoleNames();
         $permissions = $user->getAllPermissions()->pluck('name');
+
+        // Log successful login
+        \App\Services\AuditLogger::logAuthEvent('login', $user, [
+            'email' => $user->email,
+        ]);
 
         return ApiResponse::success([
             'user' => [
@@ -57,6 +72,11 @@ class AuthController extends Controller
 
     public function logout(Request $request)
     {
+        // Log logout event before token deletion
+        if ($request->user()) {
+            \App\Services\AuditLogger::logAuthEvent('logout', $request->user());
+        }
+
         $request->user()->currentAccessToken()->delete();
 
         return ApiResponse::success(null, 'Logged out successfully');
@@ -76,7 +96,7 @@ class AuthController extends Controller
 
     public function refresh(Request $request)
     {
-        $user = $request->user();
+        $user = \App\Models\User::findOrFail($request->user()->id);
         $user->tokens()->delete();
         $token = $user->createToken('auth-token')->plainTextToken;
 

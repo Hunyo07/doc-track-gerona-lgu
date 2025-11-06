@@ -349,6 +349,18 @@
                                             </svg>
                                         </button>
                                     </div>
+                                    <!-- Preview -->
+                                    <div class="mt-3">
+                                        <div v-if="filePreviewType === 'pdf'" class="border rounded-md overflow-hidden">
+                                            <embed :src="filePreviewUrl" type="application/pdf" class="w-full h-64" />
+                                        </div>
+                                        <div v-else-if="filePreviewType === 'image'" class="border rounded-md overflow-hidden">
+                                            <img :src="filePreviewUrl" alt="File preview" class="w-full h-64 object-contain bg-gray-50" />
+                                        </div>
+                                        <div v-else class="text-xs text-gray-500">
+                                            Preview not available for this file type.
+                                        </div>
+                                    </div>
                                 </div>
 
                                 <div
@@ -653,7 +665,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from "vue";
+import { ref, reactive, onMounted, computed, onUnmounted } from "vue";
 import { useDocumentStore } from "../stores/documents";
 import QRGenerator from "./QRGenerator.vue";
 import axios from "axios";
@@ -680,6 +692,8 @@ const errors = ref({});
 const documentTypes = ref([]);
 const departments = ref([]);
 const selectedFile = ref(null);
+const filePreviewUrl = ref(null);
+const filePreviewType = ref(null); // 'pdf' | 'image' | null
 const isDragOver = ref(false);
 
 // Computed properties
@@ -726,6 +740,26 @@ const onFile = (event) => {
         }
         selectedFile.value = file;
         errors.value.file = null;
+
+        // Generate preview URL for supported types
+        try {
+            if (filePreviewUrl.value) {
+                URL.revokeObjectURL(filePreviewUrl.value);
+                filePreviewUrl.value = null;
+                filePreviewType.value = null;
+            }
+            const type = file.type || "";
+            if (type.startsWith("image/")) {
+                filePreviewUrl.value = URL.createObjectURL(file);
+                filePreviewType.value = "image";
+            } else if (type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+                filePreviewUrl.value = URL.createObjectURL(file);
+                filePreviewType.value = "pdf";
+            } else {
+                filePreviewUrl.value = null;
+                filePreviewType.value = null;
+            }
+        } catch {}
     }
 };
 
@@ -740,13 +774,38 @@ const handleFileDrop = (event) => {
         }
         selectedFile.value = file;
         errors.value.file = null;
+
+        // Generate preview URL for supported types
+        try {
+            if (filePreviewUrl.value) {
+                URL.revokeObjectURL(filePreviewUrl.value);
+                filePreviewUrl.value = null;
+                filePreviewType.value = null;
+            }
+            const type = file.type || "";
+            if (type.startsWith("image/")) {
+                filePreviewUrl.value = URL.createObjectURL(file);
+                filePreviewType.value = "image";
+            } else if (type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")) {
+                filePreviewUrl.value = URL.createObjectURL(file);
+                filePreviewType.value = "pdf";
+            } else {
+                filePreviewUrl.value = null;
+                filePreviewType.value = null;
+            }
+        } catch {}
     }
 };
 
 const removeFile = () => {
     selectedFile.value = null;
-    if (document.getElementById("file-upload")) {
-        document.getElementById("file-upload").value = "";
+    if (filePreviewUrl.value) {
+        URL.revokeObjectURL(filePreviewUrl.value);
+        filePreviewUrl.value = null;
+        filePreviewType.value = null;
+    }
+    if (window.document.getElementById("file-upload")) {
+        window.document.getElementById("file-upload").value = "";
     }
 };
 
@@ -788,6 +847,25 @@ const getDocumentTypeName = (typeId) => {
     return type ? type.name : 'Unknown';
 };
 
+// Map DocumentType.code to backend-allowed type values
+const mapDocTypeCodeToType = (code) => {
+    const upper = (code || '').toUpperCase();
+    // Direct mappings for core types
+    if (['PR', 'PO', 'DV', 'GSO'].includes(upper)) return upper;
+    // Derived mappings
+    const lowerMap = {
+        'BID': 'bid',
+        'ITB': 'bid',
+        'AB': 'bid',
+        'AWD': 'award',
+        'NOA': 'award',
+        'CONTRACT': 'contract',
+        'CON': 'contract',
+        'NTP': 'contract'
+    };
+    return lowerMap[upper] || 'other';
+};
+
 const createDocument = async () => {
     loading.value = true;
     error.value = "";
@@ -809,11 +887,11 @@ const createDocument = async () => {
             }
         });
 
-        // Add the type field based on document type code
+        // Add the type field based on mapped document type code
         if (selectedDocumentType) {
             formData.append(
-                "type",
-                selectedDocumentType.code || selectedDocumentType.name
+                'type',
+                mapDocTypeCodeToType(selectedDocumentType.code || selectedDocumentType.name)
             );
         }
 
@@ -841,8 +919,13 @@ const createDocument = async () => {
         selectedFile.value = null;
         currentStep.value = 1;
         qrData.value = null;
-        if (document.getElementById("file-upload")) {
-            document.getElementById("file-upload").value = "";
+        if (filePreviewUrl.value) {
+            URL.revokeObjectURL(filePreviewUrl.value);
+            filePreviewUrl.value = null;
+            filePreviewType.value = null;
+        }
+        if (window.document.getElementById("file-upload")) {
+            window.document.getElementById("file-upload").value = "";
         }
 
         // Emit success event

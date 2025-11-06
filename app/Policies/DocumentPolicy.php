@@ -85,10 +85,15 @@ class DocumentPolicy
             return true;
         }
 
-        // Users can sign documents they created OR documents in their department
-        if ($user->hasRole('user')) {
-            return $document->created_by === $user->id 
-                || $document->current_department_id === $user->department_id;
+        // Users and dedicated signers can sign if:
+        // - They created the document
+        // - The document is currently in their department
+        // - They are explicitly assigned as the signer (assigned_to)
+        if ($user->hasRole('user') || $user->hasRole('signer')) {
+            return $document->created_by === $user->id
+                || $document->current_department_id === $user->department_id
+                || $document->assigned_to === $user->id
+                || $document->received_by === $user->id; // allow the actual receiver to sign
         }
 
         return false;

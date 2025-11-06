@@ -13,6 +13,8 @@ use Illuminate\Support\Facades\Notification;
 use App\Models\Signature;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use App\Services\PNPKISignatureService;
 use InvalidArgumentException;
 
 class DocumentWorkflowService
@@ -155,6 +157,10 @@ class DocumentWorkflowService
      */
     public function rejectDocument(Document $document, string $reason): bool
     {
+        if (!$document->canBeRejected()) {
+            throw new InvalidArgumentException('Document cannot be rejected in current status');
+        }
+
         $document->update([
             'status' => DocumentStatus::REJECTED,
             'rejected_by' => Auth::id(),
@@ -200,30 +206,73 @@ class DocumentWorkflowService
 
         $user = Auth::user();
         
-        DB::transaction(function () use ($document, $remarks, $user) {
-            // Create signature record
-            Signature::create([
+        $verified = false;
+
+        DB::transaction(function () use ($document, $remarks, $user, &$verified) {
+            // Prepare signature payload and file
+            $contentHash = null;
+            if ($document->file_path && Storage::disk('public')->exists($document->file_path)) {
+                $fileContents = Storage::disk('public')->get($document->file_path);
+                $contentHash = hash('sha256', $fileContents);
+            }
+
+            $payload = json_encode([
+                'document_number' => $document->document_number,
+                'signed_by' => $user->id,
+                'signed_at' => now()->toIso8601String(),
+                'content_hash' => $contentHash,
+                'remarks' => $remarks,
+            ]);
+
+            $filename = 'sig_' . $document->document_number . '_' . time() . '.sig';
+            $sigPath = 'signatures/' . $filename;
+            Storage::disk('public')->put($sigPath, $payload);
+
+            // Create signature record with PNPKI type
+            $signature = Signature::create([
                 'document_id' => $document->id,
                 'user_id' => $user->id,
                 'signature_image_path' => '',
-                'signature_hash' => hash('sha256', $document->document_number . now()->timestamp),
+                'signature_file_path' => $sigPath,
+                'signature_hash' => $contentHash ?? hash('sha256', $document->document_number . now()->timestamp),
                 'signed_at' => now(),
                 'certificate_serial' => 'PNPKI-' . strtoupper(substr(md5($user->id . time()), 0, 10)),
-            ]);
-
-            // Update document status
-            $document->update([
-                'status' => DocumentStatus::APPROVED,
-                'approved_by' => $user->id,
-                'approved_at' => now(),
+                'signature_type' => 'pnpki',
+                'verification_status' => 'pending',
             ]);
 
             $this->logAction($document, 'signed', 'Document signed (PNPKI)', [
                 'remarks' => $remarks,
             ]);
+
+            // Auto-verify PNPKI signature
+            /** @var PNPKISignatureService $verifier */
+            $verifier = app(PNPKISignatureService::class);
+            $verified = $verifier->verifySignature($signature);
+            $signature->verification_status = $verified ? 'verified' : 'failed';
+            $signature->save();
+
+            // Approve document ONLY if verification succeeds
+            if ($verified) {
+                $document->update([
+                    'status' => DocumentStatus::APPROVED,
+                    'approved_by' => $user->id,
+                    'approved_at' => now(),
+                ]);
+            }
+
+            $this->logAction(
+                $document,
+                $verified ? 'signature_verified' : 'signature_verification_failed',
+                $verified ? 'Signature verified' : 'Signature verification failed',
+                [
+                    'signature_id' => $signature->id,
+                    'signature_type' => 'pnpki',
+                ]
+            );
         });
 
-        return true;
+        return $verified;
     }
 
     /**

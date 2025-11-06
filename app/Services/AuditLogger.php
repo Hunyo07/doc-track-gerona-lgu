@@ -128,15 +128,10 @@ class AuditLogger
      */
     public static function logAuthEvent(string $event, ?User $user = null, array $metadata = []): void
     {
-        \Illuminate\Support\Facades\Log::info('Authentication event logged', [
-            'action' => "auth_{$event}",
-            'description' => "Authentication event: {$event}",
-            'user_id' => $user?->id ?? Auth::id(),
-            'ip_address' => Request::ip(),
-            'user_agent' => Request::userAgent(),
-            'timestamp' => now()->toISOString(),
-            'metadata' => $metadata,
-        ]);
+        // Persist auth events to DocumentLog (no document context)
+        self::createLog(null, $user, "auth_{$event}", "Authentication event: {$event}", array_merge([
+            'event' => $event,
+        ], $metadata));
     }
 
     /**

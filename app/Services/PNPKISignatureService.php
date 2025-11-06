@@ -85,6 +85,12 @@ class PNPKISignatureService
     public function verifySignature(Signature $signature): bool
     {
         try {
+            // Basic guards: ensure we have a signature file path and signed_at
+            if (empty($signature->signature_file_path)) {
+                // No file path to verify against
+                return false;
+            }
+
             // In production, this would:
             // 1. Retrieve the signature file
             // 2. Validate against PNPKI certificate authority
@@ -92,12 +98,22 @@ class PNPKISignatureService
             // 4. Verify the document hash matches
             
             // Mock implementation
-            if (!Storage::exists($signature->signature_file_path)) {
+            // We store .sig files on the 'public' disk; normalize and check existence there
+            $relativePath = ltrim($signature->signature_file_path, '/');
+            if (str_starts_with($relativePath, 'storage/')) {
+                // Some records may include the 'storage/' prefix; trim it for disk-relative lookups
+                $relativePath = substr($relativePath, strlen('storage/'));
+            }
+
+            if (!Storage::disk('public')->exists($relativePath)) {
                 return false;
             }
 
             // Check if signature is not expired (valid for 5 years in PNPKI)
             $signedAt = $signature->signed_at;
+            if (!$signedAt) {
+                return false;
+            }
             $expiryDate = $signedAt->addYears(5);
             
             if (now()->greaterThan($expiryDate)) {
@@ -125,12 +141,17 @@ class PNPKISignatureService
     private function generateSignatureHash(Document $document, User $user): string
     {
         // Create a unique hash based on document content and user
+        $fileHash = null;
+        if ($document->file_path && Storage::disk('public')->exists($document->file_path)) {
+            $fileHash = hash_file('sha256', Storage::disk('public')->path($document->file_path));
+        }
+
         $data = json_encode([
             'document_id' => $document->id,
             'document_number' => $document->document_number,
             'user_id' => $user->id,
             'timestamp' => now()->toIso8601String(),
-            'file_hash' => $document->file_path ? hash_file('sha256', Storage::path($document->file_path)) : null
+            'file_hash' => $fileHash
         ]);
 
         return hash('sha256', $data);
@@ -158,7 +179,8 @@ class PNPKISignatureService
             'issuer' => 'Philippine National Public Key Infrastructure',
         ], JSON_PRETTY_PRINT);
 
-        Storage::put($path, $signatureContent);
+        // Store on the 'public' disk to align with verification checks
+        Storage::disk('public')->put($path, $signatureContent);
 
         return $path;
     }

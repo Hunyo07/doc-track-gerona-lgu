@@ -55,22 +55,33 @@
     </div>
 
     <!-- Stats -->
-    <div v-if="stats" class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-      <div class="bg-white shadow rounded-lg p-4">
-        <p class="text-sm text-gray-500">Total Logs</p>
-        <p class="mt-1 text-2xl font-semibold text-gray-900">{{ stats.total_logs || 0 }}</p>
+    <div class="mb-6">
+      <div v-if="statsLoading" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="bg-white shadow rounded-lg p-4 animate-pulse" v-for="n in 4" :key="n">
+          <div class="h-4 bg-gray-200 rounded w-24"></div>
+          <div class="mt-3 h-8 bg-gray-200 rounded w-32"></div>
+        </div>
       </div>
-      <div class="bg-white shadow rounded-lg p-4">
-        <p class="text-sm text-gray-500">Document Actions</p>
-        <p class="mt-1 text-2xl font-semibold text-gray-900">{{ stats.document_actions || 0 }}</p>
+      <div v-else-if="statsError" class="bg-yellow-50 border border-yellow-200 text-yellow-700 rounded-lg p-4">
+        <p class="text-sm">Failed to load stats. {{ statsError }}</p>
       </div>
-      <div class="bg-white shadow rounded-lg p-4">
-        <p class="text-sm text-gray-500">Auth Events</p>
-        <p class="mt-1 text-2xl font-semibold text-gray-900">{{ stats.auth_events || 0 }}</p>
-      </div>
-      <div class="bg-white shadow rounded-lg p-4">
-        <p class="text-sm text-gray-500">Security Events</p>
-        <p class="mt-1 text-2xl font-semibold text-gray-900">{{ stats.security_events || 0 }}</p>
+      <div v-else class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="bg-white shadow rounded-lg p-4">
+          <p class="text-sm text-gray-500">Total Logs</p>
+          <p class="mt-1 text-2xl font-semibold text-gray-900">{{ stats.total_logs || 0 }}</p>
+        </div>
+        <div class="bg-white shadow rounded-lg p-4">
+          <p class="text-sm text-gray-500">Document Actions</p>
+          <p class="mt-1 text-2xl font-semibold text-gray-900">{{ stats.document_actions || 0 }}</p>
+        </div>
+        <div class="bg-white shadow rounded-lg p-4">
+          <p class="text-sm text-gray-500">Auth Events</p>
+          <p class="mt-1 text-2xl font-semibold text-gray-900">{{ stats.auth_events || 0 }}</p>
+        </div>
+        <div class="bg-white shadow rounded-lg p-4">
+          <p class="text-sm text-gray-500">Security Events</p>
+          <p class="mt-1 text-2xl font-semibold text-gray-900">{{ stats.security_events || 0 }}</p>
+        </div>
       </div>
     </div>
 
@@ -156,7 +167,9 @@ const activeTab = ref('all') // 'all' | 'security' | 'authentication'
 const logs = ref([])
 const pagination = ref(null)
 const loading = ref(false)
-const stats = ref(null)
+const stats = ref({})
+const statsLoading = ref(true)
+const statsError = ref(null)
 const filters = ref({ search: '', date_from: '', date_to: '' })
 
 const tabClass = (tab) => {
@@ -173,6 +186,8 @@ const setTab = (tab) => {
   if (activeTab.value !== tab) {
     activeTab.value = tab
     fetchLogs(1)
+    // Refresh stats as well, so cards stay in sync with filters/tab
+    fetchStats()
   }
 }
 
@@ -242,14 +257,24 @@ const fetchLogs = async (page = 1) => {
 }
 
 const fetchStats = async () => {
+  statsLoading.value = true
+  statsError.value = null
   try {
     const params = {}
     if (filters.value.date_from) params.date_from = filters.value.date_from
     if (filters.value.date_to) params.date_to = filters.value.date_to
     const response = await axios.get('/api/audit-logs/stats', { params })
-    stats.value = response.data?.data || response.data
+    const resData = response.data
+    // ApiResponse::success shape wraps payload in `data`
+    stats.value = resData?.data ?? {}
   } catch (err) {
     console.warn('Failed to fetch stats:', err)
+    statsError.value = err.response?.data?.message || 'Failed to load statistics'
+    toast.warning(statsError.value)
+    // Ensure template has an object to read from
+    stats.value = stats.value || {}
+  } finally {
+    statsLoading.value = false
   }
 }
 

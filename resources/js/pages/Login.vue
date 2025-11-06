@@ -8,7 +8,7 @@
                 <img
                     :src="logoSrc"
                     alt="Logo"
-                    class="h-10 w-10 rounded-full bg-white p-1"
+                    class="h-10 w-10 rounded-full"
                 />
                 <div>
                     <p class="text-xs uppercase tracking-wider text-sky-200">
@@ -139,7 +139,7 @@
                 <img
                     :src="logoSrc"
                     alt="Logo"
-                    class="h-8 w-8 rounded-full bg-white p-1"
+                    class="h-8 w-8 rounded-full"
                 />
                 <div>
                     <p class="text-sm">LGU Gerona Tarlac • Serbisyong Totoo</p>

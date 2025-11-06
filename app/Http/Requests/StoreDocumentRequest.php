@@ -5,6 +5,7 @@ namespace App\Http\Requests;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Support\Facades\Auth;
+use App\Models\DocumentType;
 
 class StoreDocumentRequest extends FormRequest
 {
@@ -123,6 +124,27 @@ class StoreDocumentRequest extends FormRequest
     }
 
     /**
+     * Configure the validator instance.
+     */
+    public function withValidator($validator)
+    {
+        $validator->after(function ($validator) {
+            $docTypeId = $this->input('document_type_id');
+            $metadata = $this->input('metadata');
+
+            if ($docTypeId && is_array($metadata)) {
+                $documentType = DocumentType::find($docTypeId);
+                if ($documentType && is_array($documentType->schema)) {
+                    $errors = $this->validateMetadataAgainstSchema($metadata, $documentType->schema);
+                    foreach ($errors as $error) {
+                        $validator->errors()->add('metadata', $error);
+                    }
+                }
+            }
+        });
+    }
+
+    /**
      * Prepare the data for validation.
      */
     protected function prepareForValidation(): void
@@ -178,5 +200,83 @@ class StoreDocumentRequest extends FormRequest
         $validated['created_by'] = Auth::id();
 
         return $validated;
+    }
+
+    /**
+     * Validate metadata array against a simple JSON schema stored on DocumentType.
+     * Supported field attributes: key, type (string|number|integer|boolean|date), required,
+     * maxLength, min, max, enum, pattern.
+     */
+    private function validateMetadataAgainstSchema(array $metadata, array $schema): array
+    {
+        $errors = [];
+
+        $fields = $schema['fields'] ?? [];
+        foreach ($fields as $field) {
+            $key = $field['key'] ?? null;
+            if (!$key) {
+                continue;
+            }
+
+            $exists = array_key_exists($key, $metadata);
+            $value = $exists ? $metadata[$key] : null;
+
+            // Required check
+            if (!empty($field['required']) && !$exists) {
+                $errors[] = "Missing required metadata field: {$key}";
+                continue;
+            }
+
+            if (!$exists) {
+                continue;
+            }
+
+            $type = $field['type'] ?? 'string';
+            switch ($type) {
+                case 'string':
+                    if (!is_string($value)) {
+                        $errors[] = "Field {$key} must be a string.";
+                    } elseif (isset($field['maxLength']) && mb_strlen($value) > (int)$field['maxLength']) {
+                        $errors[] = "Field {$key} exceeds maximum length of {$field['maxLength']}.";
+                    } elseif (isset($field['pattern']) && !@preg_match('/' . $field['pattern'] . '/u', $value)) {
+                        $errors[] = "Field {$key} does not match required pattern.";
+                    }
+                    break;
+                case 'number':
+                    if (!is_numeric($value)) {
+                        $errors[] = "Field {$key} must be a number.";
+                    } else {
+                        $num = (float) $value;
+                        if (isset($field['min']) && $num < (float)$field['min']) {
+                            $errors[] = "Field {$key} must be at least {$field['min']}.";
+                        }
+                        if (isset($field['max']) && $num > (float)$field['max']) {
+                            $errors[] = "Field {$key} must be at most {$field['max']}.";
+                        }
+                    }
+                    break;
+                case 'integer':
+                    if (!is_int($value) && !(is_string($value) && ctype_digit($value))) {
+                        $errors[] = "Field {$key} must be an integer.";
+                    }
+                    break;
+                case 'boolean':
+                    if (!is_bool($value)) {
+                        $errors[] = "Field {$key} must be a boolean.";
+                    }
+                    break;
+                case 'date':
+                    if (!(is_string($value) && strtotime($value) !== false)) {
+                        $errors[] = "Field {$key} must be a valid date.";
+                    }
+                    break;
+            }
+
+            if (isset($field['enum']) && is_array($field['enum']) && !in_array($value, $field['enum'])) {
+                $errors[] = "Field {$key} must be one of: " . implode(', ', $field['enum']) . '.';
+            }
+        }
+
+        return $errors;
     }
 }

@@ -35,4 +35,11 @@ return [
         ],
     ],
 
+    // Signature-related settings
+    'signatures' => [
+        // When enabled, the server will bypass digital signature verification.
+        // You can also send `demo_mode=true` per-request to override temporarily.
+        'demo_mode' => (bool) env('SIGNATURES_DEMO_MODE', false),
+    ],
+
 ];

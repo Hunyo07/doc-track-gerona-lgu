@@ -16,6 +16,9 @@ use Spatie\Permission\Traits\HasRoles;
  * @method void assignRole($roles)
  * @method void removeRole($roles)
  * @method void syncRoles($roles)
+ * @method \Illuminate\Support\Collection getRoleNames()
+ * @method \Illuminate\Support\Collection getAllPermissions()
+ * @method \Laravel\Sanctum\NewAccessToken createToken(string $name, array $abilities = ['*'])
  */
 class User extends Authenticatable
 {

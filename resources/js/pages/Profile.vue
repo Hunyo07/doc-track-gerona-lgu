@@ -732,30 +732,31 @@ const getInitials = computed(() => {
 // Methods
 const fetchProfile = async () => {
   try {
-    // Use auth store user data as base
-    const user = authStore.user
-    if (user) {
-      profile.value = {
-        id: user.id,
-        name: user.name || '',
-        email: user.email || '',
-        avatar_url: user.avatar_url || '',
-        role: user.role || 'User',
-        department: user.department || null,
-        created_at: user.created_at || null,
-        last_login_at: user.last_login_at || null,
-        phone: user.phone || '',
-        position: user.position || '',
-        bio: user.bio || ''
-      }
-      
-      // Update form values
-      profileForm.name = profile.value.name
-      profileForm.email = profile.value.email
-      profileForm.phone = profile.value.phone
-      profileForm.position = profile.value.position
-      profileForm.bio = profile.value.bio
+    const id = authStore.user?.id
+    if (!id) return
+    const response = await axios.get(`/api/users/${id}`)
+    const u = response.data?.data || response.data
+
+    profile.value = {
+      id: u.id,
+      name: u.name || '',
+      email: u.email || '',
+      avatar_url: u.avatar_url || '',
+      role: (u.roles && Array.isArray(u.roles) && u.roles[0]?.name) ? u.roles[0].name : (Array.isArray(u.roles) ? u.roles[0] : 'User'),
+      department: u.department || null,
+      created_at: u.created_at || null,
+      last_login_at: u.last_login_at || null,
+      phone: u.phone || '',
+      position: u.position || '',
+      bio: u.bio || ''
     }
+
+    // Update form values
+    profileForm.name = profile.value.name
+    profileForm.email = profile.value.email
+    profileForm.phone = profile.value.phone
+    profileForm.position = profile.value.position
+    profileForm.bio = profile.value.bio
   } catch (err) {
     console.error('Error fetching profile:', err)
     showError('Failed to load profile')
@@ -764,11 +765,26 @@ const fetchProfile = async () => {
 
 const fetchStats = async () => {
   try {
-    // Mock stats for now - replace with actual API call
+    const resp = await axios.get('/api/dashboard/stats')
+    const dash = resp.data || {}
+
+    // Header metrics
     stats.value = {
-      documents_created: Math.floor(Math.random() * 50),
-      documents_processed: Math.floor(Math.random() * 100),
-      qr_codes_scanned: Math.floor(Math.random() * 200)
+      documents_created: dash.my_documents || 0,
+      documents_processed: dash.assigned_to_me || 0,
+      qr_codes_scanned: 0
+    }
+
+    // Recent activity
+    activities.value = Array.isArray(dash.recent_activity) ? dash.recent_activity : []
+
+    // Fetch QR scans performed by current user
+    try {
+      const scanResp = await axios.get('/api/qr-codes/my-scan-count')
+      const count = scanResp.data?.count ?? (scanResp.data || 0)
+      stats.value.qr_codes_scanned = count || 0
+    } catch (e) {
+      // Silently ignore if unavailable; keep zero
     }
   } catch (err) {
     console.error('Error fetching stats:', err)
@@ -778,24 +794,9 @@ const fetchStats = async () => {
 const loadActivity = async () => {
   loadingActivity.value = true
   try {
-    // Mock activity data for now - replace with actual API call
-    activities.value = [
-      {
-        id: 1,
-        description: 'Updated profile information',
-        created_at: new Date().toISOString()
-      },
-      {
-        id: 2,
-        description: 'Changed password',
-        created_at: new Date(Date.now() - 86400000).toISOString()
-      },
-      {
-        id: 3,
-        description: 'Logged in from new device',
-        created_at: new Date(Date.now() - 172800000).toISOString()
-      }
-    ]
+    const resp = await axios.get('/api/dashboard/stats')
+    const dash = resp.data || {}
+    activities.value = Array.isArray(dash.recent_activity) ? dash.recent_activity : []
   } catch (err) {
     console.error('Error loading activity:', err)
     activities.value = []
@@ -809,7 +810,15 @@ const updateBasicInfo = async () => {
   clearMessages()
   
   try {
-    const response = await axios.put(`/api/users/${authStore.user.id}`, {
+    // Prefer the loaded profile ID, fallback to auth store
+    const targetId = profile.value?.id ?? authStore.user?.id
+    if (!targetId) {
+      showError('Cannot update profile: user ID not loaded')
+      profileLoading.value = false
+      return
+    }
+
+    const response = await axios.put(`/api/users/${targetId}`, {
       name: profileForm.name,
       email: profileForm.email,
       phone: profileForm.phone,
@@ -817,9 +826,13 @@ const updateBasicInfo = async () => {
       bio: profileForm.bio
     })
     
-    // Update auth store and profile
-    authStore.user = response.data
-    Object.assign(profile.value, response.data)
+    // Unwrap ApiResponse and update auth store + local profile
+    const updated = response.data?.data || response.data
+    authStore.user = {
+      ...(authStore.user || {}),
+      ...updated
+    }
+    Object.assign(profile.value, updated)
     
     showSuccess('Profile information updated successfully')
   } catch (err) {
@@ -840,7 +853,14 @@ const updatePassword = async () => {
   clearMessages()
   
   try {
-    await axios.put(`/api/users/${authStore.user.id}/password`, {
+    const targetId = profile.value?.id ?? authStore.user?.id
+    if (!targetId) {
+      showError('Cannot update password: user ID not loaded')
+      passwordLoading.value = false
+      return
+    }
+
+    await axios.put(`/api/users/${targetId}/password`, {
       current_password: passwordForm.current_password,
       password: passwordForm.password,
       password_confirmation: passwordForm.password_confirmation
@@ -912,14 +932,23 @@ const uploadAvatar = async () => {
   formData.append('avatar', avatarFile.value)
   
   try {
-    const response = await axios.post(`/api/users/${authStore.user.id}/avatar`, formData, {
+    const targetId = profile.value?.id ?? authStore.user?.id
+    if (!targetId) {
+      showError('Cannot upload avatar: user ID not loaded')
+      avatarLoading.value = false
+      return
+    }
+
+    const response = await axios.post(`/api/users/${targetId}/avatar`, formData, {
       headers: {
         'Content-Type': 'multipart/form-data'
       }
     })
     
-    profile.value.avatar_url = response.data.avatar_url
-    authStore.user.avatar_url = response.data.avatar_url
+    const payload = response.data?.data || response.data
+    const newUrl = payload?.avatar_url || response.data?.avatar_url
+    profile.value.avatar_url = newUrl
+    if (authStore.user) authStore.user.avatar_url = newUrl
     
     showSuccess('Avatar updated successfully')
     showAvatarModal.value = false

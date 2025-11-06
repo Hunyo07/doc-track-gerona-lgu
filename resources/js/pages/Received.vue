@@ -490,11 +490,11 @@
                                             Approve
                                         </button>
                                         <button
-                                            @click="signDocument(document)"
+                                            @click="openSignModal(document)"
                                             v-if="document.status === 'received'"
                                             class="text-purple-600 hover:text-purple-900"
                                         >
-                                            Sign (PNPKI)
+                                            Sign (Upload PDF)
                                         </button>
                                         <button
                                             @click="rejectDocument(document)"
@@ -674,6 +674,66 @@
                 </div>
             </div>
         </div>
+
+        <!-- Sign Document Modal -->
+        <div
+            v-if="showSignModal"
+            class="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50"
+        >
+            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+                <div class="mt-3">
+                    <h3 class="text-lg font-medium text-gray-900 mb-4">Sign Document</h3>
+                    <form @submit.prevent="processSign">
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Signed PDF</label>
+                            <input type="file" accept="application/pdf" @change="onSignFileChange" class="w-full border-gray-300 rounded-md" required />
+                            <p class="text-xs text-gray-500 mt-1">Upload the already signed PDF file.</p>
+                        </div>
+
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-gray-700 mb-2">Remarks (optional)</label>
+                            <textarea v-model="signForm.remarks" class="w-full border-gray-300 rounded-md" rows="3" placeholder="Add remarks"></textarea>
+                        </div>
+
+                        <!-- Demo mode toggle and warnings -->
+                        <div class="mb-4 space-y-2">
+                            <label class="inline-flex items-center gap-2 text-sm text-gray-700">
+                                <input type="checkbox" v-model="signDemoMode" class="rounded border-gray-300" />
+                                <span>Demo mode: Disable digital signature validation</span>
+                            </label>
+                            <div v-if="signDemoMode" class="rounded border border-yellow-300 bg-yellow-50 p-3 text-xs text-yellow-800">
+                                <p class="font-semibold">DEMONSTRATION MODE: Digital signature validation disabled</p>
+                                <p>This content is not digitally verified</p>
+                            </div>
+                        </div>
+
+                        <div v-if="signErrorMessage" class="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700 mb-3">
+                            {{ signErrorMessage }}
+                        </div>
+                        <div v-if="signDebugData" class="mb-3">
+                            <button @click="signShowDebug = !signShowDebug" class="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-100">
+                                {{ signShowDebug ? 'Hide' : 'Show' }} Debug Details
+                            </button>
+                            <div v-if="signShowDebug" class="rounded border bg-gray-50 p-2 mt-2">
+                                <div class="flex justify-between items-center mb-2">
+                                    <span class="text-xs font-semibold text-gray-700">Verification Debug</span>
+                                    <button @click="copyDebug()" class="text-xs px-2 py-1 rounded bg-gray-200 text-gray-800 hover:bg-gray-300">Copy</button>
+                                </div>
+                                <pre class="text-xs overflow-auto max-h-48 whitespace-pre-wrap">{{ formattedDebug }}</pre>
+                            </div>
+                        </div>
+
+                        <div class="flex justify-end space-x-2">
+                            <button type="button" @click="closeSignModal" class="px-4 py-2 bg-gray-200 text-gray-800 rounded-md">Cancel</button>
+                            <button type="submit" :disabled="signLoading || !signForm.file" class="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50">
+                                <span v-if="signLoading">Signing...</span>
+                                <span v-else>Sign</span>
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </div>
     </div>
 </template>
 
@@ -698,6 +758,19 @@ const activeTab = ref("all");
 // Modal states
 const showBulkActionModal = ref(false);
 const bulkLoading = ref(false);
+const showSignModal = ref(false);
+const signLoading = ref(false);
+const signErrorMessage = ref("");
+const signDebugData = ref(null);
+const signShowDebug = ref(false);
+const signDemoMode = ref(false);
+const formattedDebug = computed(() => {
+    try {
+        return JSON.stringify(signDebugData.value, null, 2);
+    } catch {
+        return String(signDebugData.value || "");
+    }
+});
 
 // Filters
 const filters = reactive({
@@ -713,6 +786,11 @@ const bulkActionForm = reactive({
     forward_to: "",
     notes: "",
 });
+const signForm = reactive({
+    file: null,
+    remarks: "",
+});
+const signingDocumentId = ref(null);
 
 // Computed properties
 const isAllSelected = computed(() => {
@@ -846,16 +924,70 @@ const rejectDocument = async (document) => {
     }
 };
 
-const signDocument = async (document) => {
-    const remarks = prompt("Add sign remarks (optional):") || "";
+const openSignModal = (document) => {
+    signingDocumentId.value = document.id;
+    signForm.file = null;
+    signForm.remarks = "";
+    showSignModal.value = true;
+    signErrorMessage.value = "";
+    signDebugData.value = null;
+    signShowDebug.value = false;
+    signDemoMode.value = false;
+};
+
+const closeSignModal = () => {
+    showSignModal.value = false;
+    signingDocumentId.value = null;
+    signErrorMessage.value = "";
+    signDebugData.value = null;
+    signShowDebug.value = false;
+    signDemoMode.value = false;
+};
+
+const onSignFileChange = (e) => {
+    const file = e.target.files?.[0] || null;
+    signForm.file = file;
+};
+
+const processSign = async () => {
+    if (!signingDocumentId.value || !signForm.file) {
+        window.alert("Please select a signed PDF file.");
+        return;
+    }
+    signLoading.value = true;
     try {
-        await workflowStore.signDocument(document.id, remarks);
-        alert("Document signed successfully!");
+        await workflowStore.signDocument(signingDocumentId.value, {
+            file: signForm.file,
+            remarks: signForm.remarks || "",
+            demo_mode: signDemoMode.value,
+        });
+        if (signDemoMode.value) {
+            window.alert("DEMONSTRATION MODE: Digital signature validation disabled\nThis content is not digitally verified\nDocument approved (content-only demonstration).");
+        } else {
+            window.alert("Document signed and verified successfully!");
+        }
+        closeSignModal();
         fetchDocuments();
         fetchStats();
     } catch (error) {
         console.error("Error signing document:", error);
-        alert("Error signing document. Please try again.");
+        const msg = error?.message || error?.response?.data?.message || "Error signing document";
+        signErrorMessage.value = msg;
+        signDebugData.value = error?.response?.data?.errors?.debug || null;
+        signShowDebug.value = !!signDebugData.value;
+        window.alert(msg);
+    } finally {
+        signLoading.value = false;
+    }
+};
+
+const copyDebug = async () => {
+    try {
+        await navigator.clipboard.writeText(formattedDebug.value || "");
+        // Use alert to keep consistency here
+        window.alert("Debug details copied to clipboard.");
+    } catch {
+        window.alert("Failed to copy debug details.");
     }
 };
 
