@@ -1780,6 +1780,10 @@ const initFromRoute = () => {
     if (typeof q.status === "string" && q.status.length) {
         filters.status = q.status;
     }
+    // priority quick filter
+    if (typeof q.priority === "string" && q.priority.length) {
+        filters.priority = q.priority;
+    }
     // booleans/toggles
     const truthy = (v) => v === 1 || v === "1" || v === true || v === "true";
     routeFilters.mine = truthy(q.mine);

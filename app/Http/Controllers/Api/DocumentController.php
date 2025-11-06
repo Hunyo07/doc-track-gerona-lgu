@@ -19,8 +19,11 @@ use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Auth;
+use Carbon\Carbon;
+use Carbon\CarbonPeriod;
 use Maatwebsite\Excel\Facades\Excel;
 use SimpleSoftwareIO\QrCode\Facades\QrCode as QrCodeGenerator;
 use App\Services\CacheService;
@@ -952,6 +955,83 @@ class DocumentController extends Controller
         CacheService::cacheDocumentStats($stats);
 
         return ApiResponse::success($stats, 'Document statistics retrieved successfully');
+    }
+
+    /**
+     * Get time-series stats for documents created within a date range.
+     * Returns daily counts and derived weekly aggregates.
+     */
+    public function getTimeSeries(Request $request)
+    {
+        try {
+            $dateFrom = $request->get('date_from', now()->subDays(30)->toDateString());
+            $dateTo = $request->get('date_to', now()->toDateString());
+
+            // Cache key based on range
+            $cacheKey = sprintf('timeseries:%s:%s', $dateFrom, $dateTo);
+            $cached = Cache::get(CacheService::PREFIX_DOCUMENT_STATS . $cacheKey);
+            if ($cached) {
+                Log::info('Document timeseries cache hit', ['key' => $cacheKey]);
+                return ApiResponse::success($cached, 'Document time-series retrieved successfully (cached)');
+            }
+
+            // Raw daily counts from DB
+            $rawDaily = Document::whereBetween('created_at', [$dateFrom, $dateTo])
+                ->selectRaw('DATE(created_at) as date, COUNT(*) as count')
+                ->groupBy('date')
+                ->orderBy('date')
+                ->get()
+                ->pluck('count', 'date')
+                ->toArray();
+
+            // Fill missing days with zero for clean line chart
+            $period = CarbonPeriod::create($dateFrom, $dateTo);
+            $daily = [];
+            foreach ($period as $date) {
+                $key = $date->toDateString();
+                $daily[] = [
+                    'date' => $key,
+                    'count' => (int)($rawDaily[$key] ?? 0)
+                ];
+            }
+
+            // Derive weekly aggregates from daily (ISO weeks, Monday start)
+            $weeklyMap = [];
+            foreach ($daily as $item) {
+                $d = Carbon::parse($item['date']);
+                $weekStart = $d->copy()->startOfWeek(Carbon::MONDAY)->toDateString();
+                if (!isset($weeklyMap[$weekStart])) {
+                    $weeklyMap[$weekStart] = 0;
+                }
+                $weeklyMap[$weekStart] += $item['count'];
+            }
+            ksort($weeklyMap);
+            $weekly = [];
+            foreach ($weeklyMap as $weekStart => $count) {
+                $weekly[] = [
+                    'week_start' => $weekStart,
+                    'count' => (int)$count
+                ];
+            }
+
+            $result = [
+                'daily' => $daily,
+                'weekly' => $weekly,
+                'date_from' => $dateFrom,
+                'date_to' => $dateTo,
+            ];
+
+            // Cache medium duration
+            Cache::put(CacheService::PREFIX_DOCUMENT_STATS . $cacheKey, $result, CacheService::CACHE_DURATION_MEDIUM);
+            Log::info('Document timeseries cached', ['key' => $cacheKey]);
+
+            return ApiResponse::success($result, 'Document time-series retrieved successfully');
+        } catch (\Exception $e) {
+            Log::error('Error computing document time-series: '.$e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return ApiResponse::serverError('Failed to compute document time-series');
+        }
     }
 
     public function getDepartments()

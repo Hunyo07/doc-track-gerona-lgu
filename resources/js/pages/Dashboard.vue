@@ -91,7 +91,103 @@
             </div>
           </router-link>
         </div>
-        
+
+        <!-- Status & Priority Breakdown (Tiles + Charts) -->
+        <div v-if="!loading && overview" class="space-y-6 mb-8">
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Status Breakdown (Tiles) -->
+            <div class="rounded-lg border border-gray-200 p-6">
+              <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-medium text-gray-900">Status Breakdown</h2>
+                <span class="text-xs text-gray-500">Total: {{ overview.total || 0 }}</span>
+              </div>
+              <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                <router-link
+                  v-for="(count, status) in overview.by_status"
+                  :key="status"
+                  :to="{ name: 'documents', query: { status } }"
+                  class="flex items-center justify-between rounded-md border border-gray-200 p-3 hover:bg-gray-50 transition"
+                >
+                  <span class="text-sm font-medium capitalize">{{ formatLabel(status) }}</span>
+                  <span class="text-base font-semibold">{{ count }}</span>
+                </router-link>
+              </div>
+            </div>
+
+            <!-- Priority Breakdown (Tiles) -->
+            <div class="rounded-lg border border-gray-200 p-6">
+              <div class="flex items-center justify-between mb-4">
+                <h2 class="text-lg font-medium text-gray-900">Priority Breakdown</h2>
+                <span class="text-xs text-gray-500">Overdue: {{ overview.overdue || 0 }}</span>
+              </div>
+              <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <router-link
+                  v-for="(count, priority) in overview.by_priority"
+                  :key="priority"
+                  :to="{ name: 'documents', query: { priority } }"
+                  class="flex items-center justify-between rounded-md border border-gray-200 p-3 hover:bg-gray-50 transition"
+                >
+                  <span class="text-sm font-medium capitalize" :class="getPriorityTextClass(priority)">{{ formatLabel(priority) }}</span>
+                  <span class="text-base font-semibold">{{ count }}</span>
+                </router-link>
+              </div>
+            </div>
+          </div>
+
+          <!-- Charts Row -->
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Status Donut Chart -->
+            <div class="rounded-lg border border-gray-200 p-4">
+              <h3 class="text-sm font-medium text-gray-700 mb-2">Status (Donut)</h3>
+              <apexchart type="donut" height="280" :options="statusChartOptions" :series="statusSeries" />
+            </div>
+
+            <!-- Priority Bar Chart -->
+            <div class="rounded-lg border border-gray-200 p-4">
+              <h3 class="text-sm font-medium text-gray-700 mb-2">Priority (Bar)</h3>
+              <apexchart type="bar" height="280" :options="priorityChartOptions" :series="prioritySeries" />
+            </div>
+
+            <!-- Type Bar Chart -->
+            <div class="rounded-lg border border-gray-200 p-4">
+              <h3 class="text-sm font-medium text-gray-700 mb-2">Types (Bar)</h3>
+              <apexchart type="bar" height="280" :options="typeChartOptions" :series="typeSeries" />
+            </div>
+          </div>
+
+          <!-- Time Series Line Chart -->
+          <div class="grid grid-cols-1 gap-6">
+            <div class="rounded-lg border border-gray-200 p-4">
+              <div class="flex items-center justify-between mb-2">
+                <h3 class="text-sm font-medium text-gray-700">Documents Created (Line)</h3>
+                <div class="inline-flex rounded-md shadow-sm" role="group">
+                  <button
+                    type="button"
+                    @click="lineMode = 'day'"
+                    :class="['px-3 py-1 text-xs border', lineMode === 'day' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-300']"
+                  >Day</button>
+                  <button
+                    type="button"
+                    @click="lineMode = 'week'"
+                    :class="['px-3 py-1 text-xs border border-l-0 rounded-r', lineMode === 'week' ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-white text-gray-700 border-gray-300']"
+                  >Week</button>
+                </div>
+              </div>
+              <div class="flex items-center gap-2 mb-2">
+                <input type="date" v-model="lineDateFrom" class="px-2 py-1 text-xs border border-gray-300 rounded" />
+                <span class="text-xs text-gray-500">to</span>
+                <input type="date" v-model="lineDateTo" class="px-2 py-1 text-xs border border-gray-300 rounded" />
+                <button
+                  type="button"
+                  @click="applyLineDateRange"
+                  class="px-3 py-1 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded border border-gray-300"
+                >Apply</button>
+              </div>
+              <apexchart type="line" height="300" :options="lineChartOptions" :series="lineSeries" />
+            </div>
+          </div>
+        </div>
+
         <div v-if="!loading && stats.recent_activity && stats.recent_activity.length > 0">
           <h2 class="text-lg font-medium text-gray-900 mb-4">Recent Activity</h2>
           <div class="bg-gray-50 rounded-lg p-4">
@@ -130,12 +226,16 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import axios from 'axios'
 import { useToast } from 'vue-toastification'
+import { useRouter } from 'vue-router'
 
 const toast = useToast()
+const router = useRouter()
 const stats = ref({})
+const overview = ref(null)
+const timeSeries = ref({ daily: [], weekly: [], date_from: null, date_to: null })
 const loading = ref(false)
 const error = ref('')
 const lastUpdated = ref(null)
@@ -145,8 +245,28 @@ const fetchStats = async () => {
   loading.value = true
   error.value = ''
   try {
-    const response = await axios.get('/api/dashboard/stats')
-    stats.value = response.data
+    const [dashboardResp, overviewResp, tsResp] = await Promise.all([
+      axios.get('/api/dashboard/stats'),
+      axios.get('/api/documents/stats'),
+      axios.get('/api/documents/stats/timeseries')
+    ])
+    stats.value = dashboardResp.data
+    // Document stats endpoint uses ApiResponse wrapper
+    overview.value = overviewResp.data?.data ?? overviewResp.data
+    timeSeries.value = tsResp.data?.data ?? tsResp.data
+    // Initialize date range from response if available, else default to last 30 days
+    const df = timeSeries.value?.date_from
+    const dt = timeSeries.value?.date_to
+    if (df && dt) {
+      lineDateFrom.value = df
+      lineDateTo.value = dt
+    } else {
+      const today = new Date()
+      const to = formatYYYYMMDD(today)
+      const from = formatYYYYMMDD(new Date(today.getTime() - 29 * 24 * 60 * 60 * 1000))
+      lineDateFrom.value = from
+      lineDateTo.value = to
+    }
     lastUpdated.value = new Date().toISOString()
   } catch (e) {
     error.value = 'Failed to load dashboard stats.'
@@ -182,6 +302,170 @@ const timeAgo = (date) => {
   if (hours > 0) return `${hours}h ago`
   if (minutes > 0) return `${minutes}m ago`
   return 'just now'
+}
+
+const formatLabel = (value) => {
+  if (!value) return ''
+  return value
+    .toString()
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (l) => l.toUpperCase())
+}
+
+const getPriorityTextClass = (priority) => {
+  const classes = {
+    low: 'text-green-700',
+    medium: 'text-amber-700',
+    high: 'text-orange-700',
+    urgent: 'text-red-700',
+  }
+  return classes[priority] || 'text-gray-700'
+}
+
+// Charts
+const statusLabels = computed(() => Object.keys(overview.value?.by_status || {}))
+const statusSeries = computed(() => statusLabels.value.map(k => overview.value?.by_status?.[k] || 0))
+const statusChartOptions = computed(() => ({
+  chart: {
+    type: 'donut',
+    events: {
+      dataPointSelection: (event, chartContext, config) => {
+        const idx = config?.dataPointIndex
+        if (idx != null) {
+          const raw = statusLabels.value[idx]
+          router.push({ name: 'documents', query: { status: raw } })
+        }
+      }
+    }
+  },
+  labels: statusLabels.value.map(formatLabel),
+  legend: { position: 'bottom' },
+  colors: ['#6366F1','#10B981','#F59E0B','#EF4444','#8B5CF6','#F97316','#374151','#22D3EE'],
+  tooltip: {
+    y: {
+      formatter: (val, opts) => {
+        const totals = opts?.w?.globals?.seriesTotals || []
+        const total = totals.reduce((a,b) => a + b, 0)
+        const pct = total ? Math.round((val / total) * 100) : 0
+        return `${val} (${pct}%)`
+      }
+    }
+  }
+}))
+
+const priorityOrder = ['low','medium','high','urgent']
+const prioritySeries = computed(() => [{
+  name: 'Documents',
+  data: priorityOrder.map(p => overview.value?.by_priority?.[p] || 0)
+}])
+const priorityChartOptions = computed(() => ({
+  chart: {
+    type: 'bar',
+    toolbar: { show: false },
+    events: {
+      dataPointSelection: (event, chartContext, config) => {
+        const idx = config?.dataPointIndex
+        if (idx != null) {
+          const raw = priorityOrder[idx]
+          router.push({ name: 'documents', query: { priority: raw } })
+        }
+      }
+    }
+  },
+  xaxis: { categories: priorityOrder.map(formatLabel) },
+  plotOptions: { bar: { borderRadius: 4, horizontal: false } },
+  colors: ['#10B981'],
+  tooltip: {
+    y: {
+      formatter: (val, opts) => {
+        const totals = opts?.w?.globals?.seriesTotals || []
+        const total = totals[opts?.seriesIndex ?? 0] || 0
+        const pct = total ? Math.round((val / total) * 100) : 0
+        return `${val} (${pct}%)`
+      }
+    }
+  }
+}))
+
+const typeLabels = computed(() => Object.keys(overview.value?.by_type || {}))
+const typeSeries = computed(() => [{ name: 'Documents', data: typeLabels.value.map(t => overview.value?.by_type?.[t] || 0) }])
+const typeChartOptions = computed(() => ({
+  chart: {
+    type: 'bar',
+    toolbar: { show: false },
+    events: {
+      dataPointSelection: (event, chartContext, config) => {
+        const idx = config?.dataPointIndex
+        if (idx != null) {
+          const raw = typeLabels.value[idx]
+          router.push({ name: 'documents', query: { type: raw } })
+        }
+      }
+    }
+  },
+  xaxis: { categories: typeLabels.value.map(formatLabel) },
+  plotOptions: { bar: { borderRadius: 4, horizontal: true } },
+  colors: ['#6366F1'],
+  tooltip: {
+    y: {
+      formatter: (val, opts) => {
+        const totals = opts?.w?.globals?.seriesTotals || []
+        const total = totals[opts?.seriesIndex ?? 0] || 0
+        const pct = total ? Math.round((val / total) * 100) : 0
+        return `${val} (${pct}%)`
+      }
+    }
+  }
+}))
+
+// Time series line chart (day/week toggle)
+const lineMode = ref('day')
+const lineDateFrom = ref('')
+const lineDateTo = ref('')
+const tsLoading = ref(false)
+const lineDataPoints = computed(() => {
+  const src = lineMode.value === 'day' ? (timeSeries.value?.daily || []) : (timeSeries.value?.weekly || [])
+  return src.map((d) => ({ x: (d.date || d.week_start), y: d.count }))
+})
+const lineSeries = computed(() => [{ name: 'Created', data: lineDataPoints.value }])
+const lineChartOptions = computed(() => ({
+  chart: { type: 'line', toolbar: { show: false } },
+  stroke: { curve: 'smooth', width: 3 },
+  xaxis: { type: 'datetime' },
+  tooltip: {
+    x: { format: 'dd MMM' },
+    y: { formatter: (val) => `${Math.round(val)} docs` }
+  }
+}))
+
+function formatYYYYMMDD(date) {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+async function applyLineDateRange() {
+  // basic validation
+  if (!lineDateFrom.value || !lineDateTo.value) {
+    toast.error('Please select both start and end dates')
+    return
+  }
+  if (new Date(lineDateFrom.value) > new Date(lineDateTo.value)) {
+    toast.error('Start date must be before end date')
+    return
+  }
+  try {
+    tsLoading.value = true
+    const resp = await axios.get('/api/documents/stats/timeseries', {
+      params: { date_from: lineDateFrom.value, date_to: lineDateTo.value }
+    })
+    timeSeries.value = resp.data?.data ?? resp.data
+  } catch (e) {
+    toast.error('Failed to update time series for selected range')
+  } finally {
+    tsLoading.value = false
+  }
 }
 
 onMounted(() => {

@@ -20,6 +20,7 @@ class CacheService
     const PREFIX_DOCUMENT = 'document:';
     const PREFIX_DOCUMENT_LIST = 'documents:';
     const PREFIX_DOCUMENT_STATS = 'document_stats:';
+    const PREFIX_DASHBOARD_STATS = 'dashboard_stats:';
     const PREFIX_DEPARTMENT = 'department:';
     const PREFIX_USER = 'user:';
     const PREFIX_DOCUMENT_TYPES = 'document_types';
@@ -229,6 +230,44 @@ class CacheService
         Cache::forget(self::PREFIX_DOCUMENT_STATS . 'all');
         
         Log::info('Document lists cache invalidated', ['keys_cleared' => count($commonKeys)]);
+    }
+
+    /**
+     * Cache dashboard statistics per user
+     */
+    public static function cacheDashboardStats(int $userId, array $stats, int $duration = self::CACHE_DURATION_SHORT): void
+    {
+        $key = self::PREFIX_DASHBOARD_STATS . $userId;
+        Cache::put($key, $stats, $duration);
+        
+        Log::info('Dashboard stats cached', ['user_id' => $userId, 'cache_key' => $key, 'duration' => $duration]);
+    }
+
+    /**
+     * Get cached dashboard statistics per user
+     */
+    public static function getCachedDashboardStats(int $userId): ?array
+    {
+        $key = self::PREFIX_DASHBOARD_STATS . $userId;
+        $stats = Cache::get($key);
+        
+        if ($stats) {
+            Log::info('Dashboard stats cache hit', ['user_id' => $userId, 'cache_key' => $key]);
+        } else {
+            Log::info('Dashboard stats cache miss', ['user_id' => $userId, 'cache_key' => $key]);
+        }
+        
+        return $stats;
+    }
+
+    /**
+     * Invalidate dashboard statistics per user
+     */
+    public static function invalidateDashboardStats(int $userId): void
+    {
+        $key = self::PREFIX_DASHBOARD_STATS . $userId;
+        Cache::forget($key);
+        Log::info('Dashboard stats cache invalidated', ['user_id' => $userId, 'cache_key' => $key]);
     }
 
     /**

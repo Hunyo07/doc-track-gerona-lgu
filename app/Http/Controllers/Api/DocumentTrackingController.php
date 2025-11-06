@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreDocumentTrackingRequest;
 use App\Http\Responses\ApiResponse;
+use App\Enums\DocumentStatus;
 use App\Models\Document;
 use App\Models\DocumentTracking;
+use App\Services\CacheService;
 use Illuminate\Http\Request;
 
 class DocumentTrackingController extends Controller
@@ -77,20 +79,29 @@ class DocumentTrackingController extends Controller
     {
         $user = $request->user();
         
+        // Try cached stats first (per user)
+        $cached = CacheService::getCachedDashboardStats($user->id);
+        if ($cached) {
+            return response()->json($cached);
+        }
+        
         $stats = [
             'total_documents' => Document::count(),
             'my_documents' => Document::where('created_by', $user->id)->count(),
             'assigned_to_me' => Document::where('assigned_to', $user->id)->count(),
-            'pending_review' => Document::where('status', 'under_review')->count(),
+            'pending_review' => Document::where('status', DocumentStatus::UNDER_REVIEW->value)->count(),
             'overdue' => Document::where('deadline', '<', now())
-                ->whereIn('status', ['draft', 'submitted', 'under_review'])
+                ->whereNotIn('status', [DocumentStatus::COMPLETED->value, DocumentStatus::REJECTED->value])
                 ->count(),
-            'recent_activity' => DocumentTracking::with(['document', 'user'])
+            'recent_activity' => DocumentTracking::with(['document:id,title', 'user:id,name'])
+                ->select(['id','document_id','user_id','action','notes','changes','action_date'])
                 ->orderBy('action_date', 'desc')
                 ->limit(10)
                 ->get(),
         ];
 
+        // Cache the computed stats briefly
+        CacheService::cacheDashboardStats($user->id, $stats);
         return response()->json($stats);
     }
 }

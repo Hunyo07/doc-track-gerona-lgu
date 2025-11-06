@@ -4,7 +4,7 @@ import axios from "axios";
 export const useAuthStore = defineStore("auth", {
     state: () => ({
         user: null,
-        token: localStorage.getItem("token"),
+        token: localStorage.getItem("token") || sessionStorage.getItem("token"),
         isAuthenticated: false,
     }),
 
@@ -22,10 +22,12 @@ export const useAuthStore = defineStore("auth", {
     actions: {
         async login(credentials) {
             try {
-                const response = await axios.post(
-                    "/api/auth/login",
-                    credentials
-                );
+                const { email, password, remember = true } = credentials;
+
+                const response = await axios.post("/api/auth/login", {
+                    email,
+                    password,
+                });
                 // ApiResponse wraps data in a 'data' property
                 const { user, token } = response.data.data;
 
@@ -33,16 +35,23 @@ export const useAuthStore = defineStore("auth", {
                 this.token = token;
                 this.isAuthenticated = true;
 
-                localStorage.setItem("token", token);
-                axios.defaults.headers.common[
-                    "Authorization"
-                ] = `Bearer ${token}`;
+                // Persist token according to Remember Me preference
+                if (remember) {
+                    localStorage.setItem("token", token);
+                    sessionStorage.removeItem("token");
+                } else {
+                    sessionStorage.setItem("token", token);
+                    localStorage.removeItem("token");
+                }
+
+                axios.defaults.headers.common["Authorization"] = `Bearer ${token}`;
 
                 return { success: true };
             } catch (error) {
                 return {
                     success: false,
                     message: error.response?.data?.message || "Login failed",
+                    errors: error.response?.data?.errors || null,
                 };
             }
         },
@@ -83,6 +92,7 @@ export const useAuthStore = defineStore("auth", {
                 this.token = null;
                 this.isAuthenticated = false;
                 localStorage.removeItem("token");
+                sessionStorage.removeItem("token");
                 delete axios.defaults.headers.common["Authorization"];
             }
         },
@@ -100,20 +110,15 @@ export const useAuthStore = defineStore("auth", {
         },
 
         async initializeAuth() {
-            // Always check localStorage for token, in case Pinia state was reset
-            const storedToken = localStorage.getItem("token");
-
-            console.log("🔍 Initializing auth, stored token:", storedToken ? "exists" : "not found");
+            // Check both localStorage and sessionStorage for token
+            const localToken = localStorage.getItem("token");
+            const sessionToken = sessionStorage.getItem("token");
+            const storedToken = localToken || sessionToken;
 
             if (storedToken) {
-                // Sync Pinia state with localStorage
+                // Sync Pinia state with stored token
                 this.token = storedToken;
-                axios.defaults.headers.common[
-                    "Authorization"
-                ] = `Bearer ${storedToken}`;
-                
-                console.log("🔑 Set authorization header:", axios.defaults.headers.common["Authorization"]);
-                
+                axios.defaults.headers.common["Authorization"] = `Bearer ${storedToken}`;
                 await this.fetchUser();
             } else {
                 // No token found, ensure clean state
@@ -121,7 +126,6 @@ export const useAuthStore = defineStore("auth", {
                 this.user = null;
                 this.isAuthenticated = false;
                 delete axios.defaults.headers.common["Authorization"];
-                console.log("❌ No token found, cleared auth state");
             }
         },
     },

@@ -105,6 +105,7 @@ Route::middleware(['auth:sanctum', 'rate.limit'])->group(function () {
 
     // Other non-dynamic routes
     Route::get('/stats', [DocumentController::class, 'getStats']);
+    Route::get('/stats/timeseries', [DocumentController::class, 'getTimeSeries']);
     Route::post('/bulk-update-status', [DocumentController::class, 'bulkUpdateStatus']);
     Route::post('/bulk-forward', [DocumentController::class, 'bulkForward']);
     // ... etc ...

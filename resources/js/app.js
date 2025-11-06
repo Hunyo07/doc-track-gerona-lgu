@@ -5,6 +5,7 @@ import App from "./App.vue";
 import Toast from "vue-toastification";
 import "vue-toastification/dist/index.css";
 import "./bootstrap";
+import VueApexCharts from "vue3-apexcharts";
 
 // Import pages
 import Login from "./pages/Login.vue";
@@ -167,6 +168,7 @@ const app = createApp(App);
 app.use(pinia);
 app.use(router);
 app.use(Toast, { position: "top-right", timeout: 3000, closeOnClick: true });
+app.use(VueApexCharts);
 
 // Initialize auth from persisted token
 const authStore = useAuthStore();
