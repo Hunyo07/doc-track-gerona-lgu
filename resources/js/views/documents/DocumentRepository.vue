@@ -618,7 +618,8 @@ const fetchDepartments = async () => {
 const fetchDocumentTypes = async () => {
   try {
     const response = await axios.get('/api/document-types')
-    documentTypes.value = response.data
+    const data = response.data.data || response.data
+    documentTypes.value = Array.isArray(data) ? data.filter(t => t?.is_active) : []
   } catch (error) {
     console.error('Fetch document types error:', error)
   }

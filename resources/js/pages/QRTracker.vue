@@ -341,6 +341,7 @@ const visibleLogs = computed(() => {
 
 const searchDocument = async () => {
     const q = normalizedQuery.value;
+    searchQuery.value = '';
     if (!q) {
         error.value = 'Please enter a document number or valid QR link';
         return;

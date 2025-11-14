@@ -237,6 +237,11 @@
                                 >
                                     Active
                                 </th>
+                                <th
+                                    class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                                >
+                                    Actions
+                                </th>
                             </tr>
                         </thead>
                         <tbody class="bg-white divide-y divide-gray-200">
@@ -287,6 +292,25 @@
                                         }}</span
                                     >
                                 </td>
+                                <td class="px-6 py-4 whitespace-nowrap text-sm">
+                                    <div class="flex items-center gap-2">
+                                        <button
+                                            @click="toggleActive(t)"
+                                            :disabled="isBusy(t.id)"
+                                            class="px-3 py-1 rounded-md text-white"
+                                            :class="t.is_active ? 'bg-yellow-600 hover:bg-yellow-700' : 'bg-green-600 hover:bg-green-700'"
+                                        >
+                                            {{ t.is_active ? 'Deactivate' : 'Activate' }}
+                                        </button>
+                                        <button
+                                            @click="deleteType(t)"
+                                            :disabled="isBusy(t.id)"
+                                            class="px-3 py-1 rounded-md text-white bg-red-600 hover:bg-red-700"
+                                        >
+                                            Delete
+                                        </button>
+                                    </div>
+                                </td>
                             </tr>
                         </tbody>
                     </table>
@@ -320,6 +344,8 @@ const schemaText = ref("");
 const errors = ref({});
 const schemaError = ref("");
 const submitting = ref(false);
+const rowBusy = ref(new Set());
+const isBusy = (id) => !!rowBusy.value && rowBusy.value.has(id);
 
 const firstError = (v) => (Array.isArray(v) ? v[0] : v);
 
@@ -403,6 +429,48 @@ const createType = async () => {
         }
     } finally {
         submitting.value = false;
+    }
+};
+
+const toggleActive = async (t) => {
+    if (rowBusy.value.has(t.id)) return;
+    rowBusy.value.add(t.id);
+    try {
+        const res = await axios.put(`/api/document-types/${t.id}`, {
+            is_active: !t.is_active,
+        });
+        const updated = res.data?.data || res.data;
+        const idx = documentTypes.value.findIndex((x) => x.id === t.id);
+        if (idx !== -1) documentTypes.value[idx] = updated;
+        toast.success(updated.is_active ? 'Activated' : 'Deactivated');
+    } catch (err) {
+        if (err.response?.status === 403) {
+            toast.error('Forbidden: Admin access required');
+        } else {
+            toast.error(err.response?.data?.message || 'Failed to update');
+        }
+    } finally {
+        rowBusy.value.delete(t.id);
+    }
+};
+
+const deleteType = async (t) => {
+    if (rowBusy.value.has(t.id)) return;
+    const ok = window.confirm('Delete this document type?');
+    if (!ok) return;
+    rowBusy.value.add(t.id);
+    try {
+        await axios.delete(`/api/document-types/${t.id}`);
+        documentTypes.value = documentTypes.value.filter((x) => x.id !== t.id);
+        toast.success('Document type deleted');
+    } catch (err) {
+        if (err.response?.status === 403) {
+            toast.error('Forbidden: Admin access required');
+        } else {
+            toast.error(err.response?.data?.message || 'Failed to delete');
+        }
+    } finally {
+        rowBusy.value.delete(t.id);
     }
 };
 

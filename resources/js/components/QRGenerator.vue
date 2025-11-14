@@ -196,7 +196,8 @@ export default {
             try {
                 const response = await fetch("/api/document-types");
                 const result = await response.json();
-                documentTypes.value = result;
+                const data = result?.data || result;
+                documentTypes.value = Array.isArray(data) ? data.filter((t) => t?.is_active) : [];
             } catch (error) {
                 console.error("Error loading document types:", error);
             }
